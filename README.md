@@ -112,17 +112,37 @@ sleep 1
 /firmware/run.sh &
 ```
 
-Nothing is listening here, so it repeats. Stop QEMU once `draycfg.cfg` has
-appeared and run `./qemu.sh` again -- it picks the saved config up
-automatically:
+Nothing is listening here, so it repeats. And it is not one restart: DrayOS
+provisions itself over several boots, writing the config, then the
+certificate, then the 48 MB flash image, asking to be restarted after each.
+
+`supervise.sh` is that missing half -- `recvCmd` and `/etc/runcommand/reboot`
+in one loop. Run it instead of `qemu.sh`:
 
 ```sh
-ls -l draycfg.cfg          # ~5.6 MB
-sudo ./qemu.sh             # [*] using the config DrayOS saved
+cd out/rootfs/firmware
+sudo /path/to/supervise.sh ./qemu.sh
 ```
 
-Then `http://192.168.1.1/weblogin.htm`. To go back to defaults, delete
-`draycfg.cfg`.
+```
+[supervise] ---- boot 1 ----
+[*] first boot: no saved config ...
+Memsave Config addr 0x4af489d8 size 5673080
+[supervise] DrayOS asked for a restart
+[supervise] ---- boot 2 ----
+[*] using the config DrayOS saved (5673080 bytes)
+...
+```
+
+It stops when DrayOS stops asking, or after `MAX` boots (default 10).
+
+Then `http://192.168.1.1/weblogin.htm`. To start over, delete `draycfg.cfg`,
+`draycert.cfg` and `v3910_ram_flash.bin`.
+
+`supervise.sh` also creates `serial0.in` and `serial0.out`. QEMU's pipe
+chardev prefers those over a single bidirectional FIFO, which gives guest
+output and host input one direction each instead of both sides racing to read
+the same pipe.
 
 ## Notes on the script itself
 
