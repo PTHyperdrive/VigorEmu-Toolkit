@@ -40,17 +40,28 @@ teardown() {
 
 if [ "${1:-}" = down ]; then teardown; echo "[+] removed"; exit 0; fi
 
-# Refuse to touch a real interface. On a VMware Kali the adapter is often
-# called eth0, which is exactly the name the write-up wants for its tap.
-for d in "$IFLAN" "$IFWAN"; do
-    if ip link show "$d" >/dev/null 2>&1 && ! is_tap "$d"; then
-        echo "[x] $d already exists and is not a tap -- it looks like a real" >&2
-        echo "    interface, and bridging it would take this machine off the" >&2
-        echo "    network. Pick unused names instead, e.g." >&2
-        echo "      sudo IFLAN=dray0 IFWAN=dray1 $0" >&2
+# The write-up names its taps eth0 and eth1, which happened to be free on the
+# author's machine. On a VMware Kali those are the real adapters, and bridging
+# one would take the box off the network. The names carry no meaning -- they
+# only have to be two interfaces that do not already exist -- so fall back to
+# unused ones rather than refusing.
+taken() { ip link show "$1" >/dev/null 2>&1 && ! is_tap "$1"; }
+if taken "$IFLAN" || taken "$IFWAN"; then
+    real=""
+    taken "$IFLAN" && real="$IFLAN"
+    taken "$IFWAN" && real="${real:+$real and }$IFWAN"
+    for pair in "dray0 dray1" "drayA drayB" "vlan0 vlan1"; do
+        set -- $pair
+        if ! taken "$1" && ! taken "$2"; then IFLAN=$1; IFWAN=$2; break; fi
+    done
+    if taken "$IFLAN" || taken "$IFWAN"; then
+        echo "[x] could not find two free interface names; pass your own:" >&2
+        echo "      sudo IFLAN=... IFWAN=... $0" >&2
         exit 1
     fi
-done
+    echo "[*] $real already exist as real interfaces; using $IFLAN and $IFWAN"
+    echo "    instead. The names are arbitrary -- they are taps either way."
+fi
 
 teardown
 

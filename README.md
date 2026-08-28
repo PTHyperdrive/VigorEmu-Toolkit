@@ -78,12 +78,17 @@ So the whole topology is virtual. **No second network adapter is needed**, and
 nothing touches the interface this machine actually uses. `net.sh` does both
 steps.
 
-If your real adapter is already called `eth0` -- common on a VMware Kali --
-the script refuses rather than bridging it, and you pick other names:
+The names are arbitrary; they only have to be two interfaces that do not
+already exist. On a VMware Kali `eth0` and `eth1` are usually the real
+adapters, so the script picks free ones and says so:
 
-```sh
-sudo IFLAN=dray0 IFWAN=dray1 ./net.sh
 ```
+[*] eth0 and eth1 already exist as real interfaces; using dray0 and dray1
+    instead. The names are arbitrary -- they are taps either way.
+```
+
+Override with `sudo IFLAN=... IFWAN=... ./net.sh` if you want particular ones.
+Nothing here touches a real adapter.
 
 `net.sh.kanxue` is the original, kept for reference. It calls `brctl`, which
 current Kali does not install, and never removes what it made, so a second run
