@@ -25,19 +25,34 @@ mkdir -p "$ROOTFS/data/uffs" "$ROOTFS/usr/share/qemu"
 cp "$HERE/qemu.sh" "$FW/qemu.sh"
 chmod +x "$FW/qemu.sh"
 
+# qemu.sh runs "./qemu-system-aarch64" -- a relative path -- so the binary has
+# to sit in firmware/ itself. Symlink rather than copy unless LINK=0, so the
+# build tree stays the single copy and a rebuild is picked up automatically.
+QBIN=""
 if [ $# -ge 2 ]; then
-    cp "$(readlink -f "$2")" "$FW/qemu-system-aarch64"
-    chmod +x "$FW/qemu-system-aarch64"
-    echo "[+] qemu-system-aarch64 -> $FW/"
+    QBIN=$(readlink -f "$2")
+    rm -f "$FW/qemu-system-aarch64"
+    if [ "${LINK:-1}" = 1 ]; then
+        ln -s "$QBIN" "$FW/qemu-system-aarch64"
+        echo "[+] qemu-system-aarch64 -> symlink to $QBIN"
+    else
+        cp "$QBIN" "$FW/qemu-system-aarch64"
+        chmod +x "$FW/qemu-system-aarch64"
+        echo "[+] qemu-system-aarch64 -> copied into $FW/"
+    fi
 else
-    echo "[!] no QEMU given; build one with build-qemu.sh and copy it to $FW/"
+    echo "[!] no QEMU given; build one with build-qemu.sh and pass it here."
 fi
 
 # efi-virtio.rom is what -L points at. The firmware ships one; fall back to
 # the host QEMU's copy.
 if [ ! -f "$ROOTFS/usr/share/qemu/efi-virtio.rom" ]; then
-    for c in /usr/share/qemu/efi-virtio.rom /usr/share/seabios/efi-virtio.rom; do
-        [ -f "$c" ] && cp "$c" "$ROOTFS/usr/share/qemu/" && break
+    # -L points at ../usr/share/qemu, so the option ROM the virtio NICs need
+    # must be there. Prefer the one from the build we just made.
+    cands=(/usr/share/qemu/efi-virtio.rom /usr/share/seabios/efi-virtio.rom)
+    [ -n "$QBIN" ] && cands=("$(dirname "$QBIN")/../pc-bios/efi-virtio.rom" "${cands[@]}")
+    for c in "${cands[@]}"; do
+        [ -f "$c" ] && cp "$c" "$ROOTFS/usr/share/qemu/"             && echo "[+] efi-virtio.rom from $c" && break
     done
 fi
 
