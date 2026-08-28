@@ -43,6 +43,27 @@ for p in 80 443 23 21; do
 done
 
 echo
+echo "=== 5. how does the host route to $IP, unforced? ==="
+# check.sh's ping used -I to force the interface. A browser does not, so if
+# something else claims 192.168.1.0/24 the traffic leaves the wrong way.
+ip route get "$IP" 2>&1 | sed 's/^/    /'
+echo "    --- routes covering it ---"
+ip route show to match "$IP" 2>/dev/null | sed 's/^/    /'
+echo "    --- unforced ping ---"
+ping -c 2 -W 1 "$IP" 2>&1 | tail -2 | sed 's/^/    /'
+
+echo
+echo "=== 6. does it actually serve HTTP? ==="
+# An open port only proves the handshake. Ask for a page.
+for u in "http://$IP/" "http://$IP/weblogin.htm"; do
+    printf '    %-34s ' "$u"
+    code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 6 --noproxy '*' "$u" 2>/dev/null)
+    [ -n "$code" ] && [ "$code" != 000 ] && echo "HTTP $code" || echo "no response"
+done
+echo "    --- proxy environment (a set proxy breaks a browser here) ---"
+env | grep -iE '^(http|https|all|no)_proxy=' | sed 's/^/    /' || echo "    none set"
+
+echo
 echo "=== verdict ==="
 if ! grep -q . /tmp/cap.txt 2>/dev/null; then
     echo "  Nothing at all on $LAN. DrayOS is not transmitting: its LAN"
@@ -50,9 +71,13 @@ if ! grep -q . /tmp/cap.txt 2>/dev/null; then
     echo "  the one on this tap. Check the guest with the Command Line"
     echo "  Console (option 2 on its Main Menu)."
 elif grep -qi 'arp.*reply\|is-at' /tmp/cap.txt; then
-    echo "  DrayOS answers ARP, so the link is fine and the guest's stack is"
-    echo "  up. If no port answers, the problem is inside DrayOS -- httpd is"
-    echo "  running but not serving, or bound elsewhere."
+    echo "  DrayOS answers ARP and the link is fine. If section 6 returned an"
+    echo "  HTTP code, the router is serving and the browser is the problem:"
+    echo "    - Firefox proxy: Settings > Network Settings > No proxy"
+    echo "    - HTTPS-Only mode: turn it off, or use http:// explicitly"
+    echo "    - type http://192.168.1.1/ in full so it is not searched for"
+    echo "  If section 5 routes $IP out of some other interface, that is the"
+    echo "  cause: the forced ping above works and the browser does not."
 else
     echo "  Traffic on $LAN but no ARP reply from $IP. The guest is on the"
     echo "  link but not at that address, or its LAN MAC differs from the one"
