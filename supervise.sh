@@ -60,12 +60,28 @@ exec 3<> serial0.out
 exec 4<> serial0.in
 
 QPID=""
+# qemu.sh does not exec the emulator, so QPID is the wrapper shell and
+# qemu-system-aarch64 is its child. Killing only the wrapper orphans the
+# emulator, which keeps running and keeps holding qemu-lan -- so the next boot
+# dies with "could not configure /dev/net/tun: Device or resource busy" while
+# the old instance carries on printing. Kill the emulator itself and wait for
+# it to actually go before returning.
+#
+# This kills every qemu-system-aarch64 on the machine, not just ours. That is
+# what /etc/runcommand/reboot does too ("killall qemu-system-aarch64"), but do
+# not run this alongside another QEMU you care about.
 stop_qemu() {
-    [ -n "$QPID" ] || return 0
-    kill "$QPID" 2>/dev/null
-    for _ in $(seq 25); do kill -0 "$QPID" 2>/dev/null || break; sleep 0.2; done
-    kill -9 "$QPID" 2>/dev/null
-    wait "$QPID" 2>/dev/null
+    [ -n "$QPID" ] && kill "$QPID" 2>/dev/null
+    pkill -x qemu-system-aarch64 2>/dev/null
+    for _ in $(seq 50); do
+        pgrep -x qemu-system-aarch64 >/dev/null 2>&1 || break
+        sleep 0.2
+    done
+    if pgrep -x qemu-system-aarch64 >/dev/null 2>&1; then
+        pkill -9 -x qemu-system-aarch64 2>/dev/null
+        sleep 1
+    fi
+    [ -n "$QPID" ] && wait "$QPID" 2>/dev/null
     QPID=""
 }
 drain() { while read -r -t 0.1 -u 3 _ 2>/dev/null; do :; done; }
@@ -78,13 +94,26 @@ while [ "$boot" -lt "$MAX" ]; do
     # its last "reboot qemu" lines fire instant restarts and the loop spins
     # without ever really booting.
     drain
+    # The tap is released only when the emulator has fully exited; starting
+    # the next one too early is what produced "Device or resource busy".
+    for _ in $(seq 25); do
+        pgrep -x qemu-system-aarch64 >/dev/null 2>&1 || break
+        sleep 0.2
+    done
     echo "[supervise] ---- boot $boot ----"
     started=$SECONDS
     "$QEMU_SH" &
     QPID=$!
 
+    # Wait for the emulator to appear before watching for it to leave; the
+    # wrapper exits well before qemu-system-aarch64 does.
+    for _ in $(seq 25); do
+        pgrep -x qemu-system-aarch64 >/dev/null 2>&1 && break
+        sleep 0.2
+    done
+
     restart=0
-    while kill -0 "$QPID" 2>/dev/null; do
+    while pgrep -x qemu-system-aarch64 >/dev/null 2>&1; do
         if IFS= read -r -t 2 -u 3 line; then
             case "$line" in
                 *"reboot qemu"*)
@@ -95,7 +124,7 @@ while [ "$boot" -lt "$MAX" ]; do
         fi
     done
 
-    if [ "$restart" = 0 ] && ! kill -0 "$QPID" 2>/dev/null; then
+    if [ "$restart" = 0 ] && ! pgrep -x qemu-system-aarch64 >/dev/null 2>&1; then
         wait "$QPID" 2>/dev/null; rc=$?
         QPID=""
         if [ $((SECONDS - started)) -lt 5 ]; then
