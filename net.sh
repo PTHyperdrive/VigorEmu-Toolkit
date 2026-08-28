@@ -104,7 +104,17 @@ else
     echo "    traffic reaching DrayOS even once it boots." >&2
 fi
 
+if [ "${1:-}" = status ]; then :; fi
+
 echo
 ip -br addr show br-lan br-wan qemu-lan qemu-wan "$IFLAN" "$IFWAN" 2>/dev/null || true
 echo
 echo "[+] host is $MYLANIP on br-lan; DrayOS will be 192.168.1.1"
+echo
+echo "    br-lan reads DOWN until QEMU starts, and that is normal: a bridge"
+echo "    follows its ports, a tap has no carrier until a program opens it,"
+echo "    and nothing has opened qemu-lan yet. It comes up when the emulator"
+echo "    attaches. Check again once DrayOS is running:"
+echo "      ip -br link show br-lan qemu-lan     # expect UP"
+echo "      ping -c2 192.168.1.1"
+echo "      sudo tcpdump -ni qemu-lan            # is DrayOS answering ARP?"
