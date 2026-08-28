@@ -22,10 +22,40 @@ if [ ! -d qemu-2.12.1 ]; then
 fi
 
 cd qemu-2.12.1
+
+# configure reports "glib-2.22 gthread-2.0 is required to compile QEMU" for
+# any failure of that test, including the packages simply not being there, so
+# check the specific modules first and say which one is missing.
+echo "[*] checking build dependencies"
+missing=()
+command -v pkg-config >/dev/null || missing+=(pkg-config)
+for m in glib-2.0 gthread-2.0 pixman-1 zlib; do
+    pkg-config --exists "$m" 2>/dev/null || missing+=("$m")
+done
+if [ ${#missing[@]} -gt 0 ]; then
+    echo "[x] pkg-config cannot find: ${missing[*]}" >&2
+    echo "    sudo apt install -y pkg-config libglib2.0-dev libpixman-1-dev zlib1g-dev build-essential" >&2
+    exit 1
+fi
+echo "    glib   $(pkg-config --modversion glib-2.0)"
+echo "    pixman $(pkg-config --modversion pixman-1)"
+
+# QEMU 2.12 predates "python" meaning python3, and Debian no longer ships a
+# bare `python`. Point configure at python3 explicitly when that is the case.
+PY_ARG=()
+command -v python >/dev/null || PY_ARG=(--python="$(command -v python3)")
+
 echo "[*] configuring"
 # --disable-werror matters: this is 2018 code and modern gcc finds new
 # warnings in it. Only the aarch64 target is needed.
-./configure --target-list=aarch64-softmmu --disable-werror --disable-docs
+if ! ./configure --target-list=aarch64-softmmu --disable-werror --disable-docs                  --disable-capstone --disable-sdl --disable-gtk "${PY_ARG[@]}"; then
+    echo
+    echo "[x] configure failed. Its own message is generic; the real compiler" >&2
+    echo "    error is at the end of config.log:" >&2
+    echo "----------------------------------------------------------------" >&2
+    tail -40 config.log >&2
+    exit 1
+fi
 
 echo "[*] building"
 make -j"$(nproc)"
