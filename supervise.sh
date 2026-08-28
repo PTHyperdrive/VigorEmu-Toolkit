@@ -15,9 +15,18 @@ set -uo pipefail
 RESET=0
 if [ "${1:-}" = "--reset" ]; then RESET=1; shift; fi
 
-QEMU_SH=$(readlink -f "${1:-./qemu.sh}")
-[ -x "$QEMU_SH" ] || { echo "no qemu.sh at $QEMU_SH" >&2; exit 1; }
-cd "$(dirname "$QEMU_SH")"
+# Resolve the directory as given, NOT through the symlink. firmware/qemu.sh
+# is a link into the repo, and readlink -f on it would put the working
+# directory there instead -- where ./qemu-system-aarch64 and the config files
+# do not exist, so QEMU dies with rc=127. Everything qemu.sh touches is
+# relative to where it is staged, so that is the directory to run it from.
+ARG=${1:-./qemu.sh}
+WORKDIR=$(cd "$(dirname "$ARG")" 2>/dev/null && pwd) || {
+    echo "no such directory: $(dirname "$ARG")" >&2; exit 1; }
+QEMU_SH="$WORKDIR/$(basename "$ARG")"
+[ -x "$QEMU_SH" ] || { echo "no runnable qemu.sh at $QEMU_SH" >&2; exit 1; }
+cd "$WORKDIR"
+echo "[supervise] running in $WORKDIR"
 
 [ "$(id -u)" = 0 ] || echo "[!] not root: the tap devices and the state files" \
                            "qemu.sh writes both need it. Use sudo." >&2
