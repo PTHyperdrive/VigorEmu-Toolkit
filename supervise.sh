@@ -36,7 +36,7 @@ MAX=${MAX:-10}
 if [ "$RESET" = 1 ]; then
     echo "[supervise] clearing saved state"
     rm -f draycfg.cfg draycert.cfg drayf2.cfg license.cfg draycfg.default \
-          v3910_ram_flash.bin lan_mac ../data/uffs/* 2>/dev/null
+          v3910_ram_flash.bin lan_mac ../data/uffs/* \n          /app/gci/max_portmap_sessions 2>/dev/null
 fi
 
 # A QEMU left over from a previous run still holds qemu-lan, and the next one
@@ -128,6 +128,13 @@ while [ "$boot" -lt "$MAX" ]; do
 ' "$f"
         fi
     done
+    if [ -s /app/gci/max_portmap_sessions ]; then
+        printf '    %-22s %s
+' "session count"                "$(cat /app/gci/max_portmap_sessions)"
+    else
+        printf '    %-22s absent -- DrayOS has not written one yet
+' "session count"
+    fi
     if [ -s v3910_ram_flash.bin ]; then
         hdr=$(od -An -tu2 -N8 v3910_ram_flash.bin 2>/dev/null | tr -s ' ')
         echo "    flash header (first 4 u16):$hdr"

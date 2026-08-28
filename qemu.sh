@@ -96,16 +96,47 @@ mkdir -p ../data/uffs
 uffs_flash="./v3910_ram_flash.bin"
 [ -f "$uffs_flash" ] || touch "$uffs_flash"
 
-echo "1" > memsize
+# DEVIATION: pick memsize the way run.sh does, from the session count.
+#
+# This is what the endless "reboot qemu" actually is. check_max_portmap_sessions
+# compares the session tables memsize gives it against what the config asks
+# for; on a mismatch it writes the wanted value out and reboots so the launcher
+# can re-read it:
+#
+#   frmsave <addr> <size> /app/gci/max_portmap_sessions
+#   ## Drv software rebooting : cmd=1, fun=check_max_portmap_sessions ##
+#
+# run.sh line 99 reads that file and maps it to a memsize digit. The write-up's
+# script hardcodes "1" and never looks, so the mismatch survives every restart
+# and DrayOS asks again forever.
+#
+# The path is ABSOLUTE. The QEMU patch hands whatever path DrayOS sends
+# straight to qmp_memsave, so it lands at /app/gci on the host, not ./app/gci
+# -- and if that directory is missing the write fails silently, because the
+# patch ignores the Error it is handed.
+mkdir -p /app/gci
+session_path="/app/gci/max_portmap_sessions"
+if [ -s "$session_path" ]; then
+    case "$(cat "$session_path")" in
+        300K)  echo "1" > memsize ;;
+        500K)  echo "2" > memsize ;;
+        1000K) echo "3" > memsize ;;
+        *)     echo "0" > memsize ;;
+    esac
+    echo "[*] max_portmap_sessions=$(cat "$session_path") -> memsize $(cat memsize)"
+else
+    echo "1" > memsize
+    echo "[*] no session count yet; memsize 1. DrayOS will write one and ask"
+    echo "    to restart -- that is the handshake, not a failure."
+fi
 
 (sleep 20 && ethtool -K qemu-lan tx off) &
 
 model="./model"
 echo "3" > ./model
 
-rm -rf ./app && mkdir -p ./app/gci
-GCI_PATH="./app/gci"
-GCI_FAIL="./app/gci_exp_fail"
+GCI_PATH="/app/gci"
+GCI_FAIL="/app/gci_exp_fail"
 GDEF_FILE="$GCI_PATH/draycfg.def"
 GEXP_FLAG="$GCI_PATH/EXP_FLAG"
 GEXP_FILE="$GCI_PATH/draycfg.exp"
