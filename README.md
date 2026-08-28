@@ -88,7 +88,41 @@ cd out/rootfs/firmware
 sudo ./qemu.sh
 ```
 
-Then `http://192.168.1.1/weblogin.htm`.
+**It takes two boots.** There is no `/cfg` here, so the first boot finds no
+configuration, extracts the built-in `gDefault`, and writes a real config out
+through the patched QEMU:
+
+```
+[_virtcons_out:2752]======memsave 1257540056 5673080 x86
+Memsave Config addr 0x4af489d8 size 5673080
+```
+
+Then it asks the host to restart it, forever:
+
+```
+[_virtcons_out:2752]======reboot qemu
+```
+
+That is not an error. On the device `recvCmd` reads those lines off `serial0`
+and dispatches them through `/etc/runcommand/`, and `reboot qemu` is:
+
+```sh
+killall qemu-system-aarch64
+sleep 1
+/firmware/run.sh &
+```
+
+Nothing is listening here, so it repeats. Stop QEMU once `draycfg.cfg` has
+appeared and run `./qemu.sh` again -- it picks the saved config up
+automatically:
+
+```sh
+ls -l draycfg.cfg          # ~5.6 MB
+sudo ./qemu.sh             # [*] using the config DrayOS saved
+```
+
+Then `http://192.168.1.1/weblogin.htm`. To go back to defaults, delete
+`draycfg.cfg`.
 
 ## Notes on the script itself
 

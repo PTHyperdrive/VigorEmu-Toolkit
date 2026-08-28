@@ -42,6 +42,29 @@ echo "kvm" > $enable_kvm_path
 # over from the 2962 version of this script.
 cfg_path="./magic_file"
 
+# DEVIATION from the verbatim script, and the only one in this file.
+#
+# On the device, cfg_path is /cfg/draycfg.cfg -- a real config on the Linux
+# side -- and magic_file is only the fallback. Here there is no /cfg, so the
+# first boot gets the sentinel, finds no config, extracts gDefault, and writes
+# a real one out through the patched QEMU:
+#
+#   [_virtcons_out:2752]======memsave 1257540056 5673080 x86
+#   Memsave Config addr 0x4af489d8 size 5673080
+#
+# It then asks the host to restart it ("reboot qemu"), which on the device is
+# recvCmd running /etc/runcommand/reboot: killall qemu-system-aarch64, then
+# run.sh again. From the second boot on, that config is what should be loaded,
+# so pick it up if it exists. Delete draycfg.cfg to start from defaults again.
+if [ -s ./draycfg.cfg ]; then
+    cfg_path="./draycfg.cfg"
+    echo "[*] using the config DrayOS saved ($(stat -c%s ./draycfg.cfg) bytes)"
+else
+    echo "[*] first boot: no saved config, DrayOS will extract gDefault and"
+    echo "    ask to reboot. Stop it when you see \"Memsave Config\", then"
+    echo "    run this again."
+fi
+
 echo "GCI_SKIP" > gci_magic
 
 mkdir -p ../data/uffs
