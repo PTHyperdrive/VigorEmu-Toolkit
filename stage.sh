@@ -22,8 +22,15 @@ FW="$ROOTFS/firmware"
 [ -f "$FW/magic_file" ]       || { echo "no magic_file under $FW" >&2; exit 1; }
 
 mkdir -p "$ROOTFS/data/uffs" "$ROOTFS/usr/share/qemu"
-cp "$HERE/qemu.sh" "$FW/qemu.sh"
-chmod +x "$FW/qemu.sh"
+# Symlink, not copy: a copy goes stale the moment the repo is updated, and
+# the staged one is what actually runs. This way git pull takes effect with no
+# re-staging. STAGE_COPY=1 copies instead, for moving the tree elsewhere.
+rm -f "$FW/qemu.sh"
+if [ "${STAGE_COPY:-0}" = 1 ]; then
+    cp "$HERE/qemu.sh" "$FW/qemu.sh"; chmod +x "$FW/qemu.sh"
+else
+    ln -s "$HERE/qemu.sh" "$FW/qemu.sh"
+fi
 
 # qemu.sh runs "./qemu-system-aarch64" -- a relative path -- so the binary has
 # to sit in firmware/ itself. Symlink rather than copy unless LINK=0, so the

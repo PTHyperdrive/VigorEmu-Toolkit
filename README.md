@@ -121,8 +121,16 @@ in one loop. Run it instead of `qemu.sh`:
 
 ```sh
 cd out/rootfs/firmware
-sudo /path/to/supervise.sh ./qemu.sh
+sudo /path/to/supervise.sh --reset ./qemu.sh
 ```
+
+**Always use sudo.** The tap devices need root, and so do the state files
+`qemu.sh` writes. Mixing a root run with a plain one leaves files root owns
+and the next plain run fails with `./platform: Permission denied`.
+
+`--reset` clears saved state first: the config, certificate, flash image and
+`lan_mac`. Use it whenever you change something that affects provisioning,
+because a config saved under the old settings will be reloaded otherwise.
 
 ```
 [supervise] ---- boot 1 ----
