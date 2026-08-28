@@ -41,11 +41,24 @@ fi
 
 # A QEMU left over from a previous run still holds qemu-lan, and the next one
 # fails with "could not configure /dev/net/tun: Device or resource busy".
-if pgrep -x qemu-system-aarch64 >/dev/null 2>&1; then
-    echo "[supervise] killing a leftover qemu-system-aarch64"
-    pkill -x qemu-system-aarch64
+# A QEMU left over from any earlier run -- including one started by hand in
+# another terminal -- still holds qemu-lan, and the next one fails with
+# "could not configure /dev/net/tun (qemu-lan): Device or resource busy".
+# Match on the command line as well as the name: the staged binary is a
+# symlink, and a run started by a different path will not match -x.
+leftovers=$(pgrep -f 'qemu-system-aarch64' 2>/dev/null || true)
+if [ -n "$leftovers" ]; then
+    echo "[supervise] killing leftover QEMU: $(echo $leftovers)"
+    kill $leftovers 2>/dev/null
     sleep 2
-    pkill -9 -x qemu-system-aarch64 2>/dev/null
+    kill -9 $leftovers 2>/dev/null
+    sleep 1
+fi
+# Anything still holding the tap now is not ours to kill; say so rather than
+# failing later with a message that does not name the cause.
+if command -v fuser >/dev/null && fuser /dev/net/tun >/dev/null 2>&1; then
+    echo "[!] something still has /dev/net/tun open:" >&2
+    fuser -v /dev/net/tun 2>&1 | sed 's/^/    /' >&2
 fi
 
 # QEMU's pipe chardev prefers <path>.in and <path>.out when both exist, and
@@ -72,13 +85,13 @@ QPID=""
 # not run this alongside another QEMU you care about.
 stop_qemu() {
     [ -n "$QPID" ] && kill "$QPID" 2>/dev/null
-    pkill -x qemu-system-aarch64 2>/dev/null
+    pkill -f qemu-system-aarch64 2>/dev/null
     for _ in $(seq 50); do
-        pgrep -x qemu-system-aarch64 >/dev/null 2>&1 || break
+        pgrep -f qemu-system-aarch64 >/dev/null 2>&1 || break
         sleep 0.2
     done
-    if pgrep -x qemu-system-aarch64 >/dev/null 2>&1; then
-        pkill -9 -x qemu-system-aarch64 2>/dev/null
+    if pgrep -f qemu-system-aarch64 >/dev/null 2>&1; then
+        pkill -9 -f qemu-system-aarch64 2>/dev/null
         sleep 1
     fi
     [ -n "$QPID" ] && wait "$QPID" 2>/dev/null
@@ -97,7 +110,7 @@ while [ "$boot" -lt "$MAX" ]; do
     # The tap is released only when the emulator has fully exited; starting
     # the next one too early is what produced "Device or resource busy".
     for _ in $(seq 25); do
-        pgrep -x qemu-system-aarch64 >/dev/null 2>&1 || break
+        pgrep -f qemu-system-aarch64 >/dev/null 2>&1 || break
         sleep 0.2
     done
     echo "[supervise] ---- boot $boot ----"
@@ -108,12 +121,12 @@ while [ "$boot" -lt "$MAX" ]; do
     # Wait for the emulator to appear before watching for it to leave; the
     # wrapper exits well before qemu-system-aarch64 does.
     for _ in $(seq 25); do
-        pgrep -x qemu-system-aarch64 >/dev/null 2>&1 && break
+        pgrep -f qemu-system-aarch64 >/dev/null 2>&1 && break
         sleep 0.2
     done
 
     restart=0
-    while pgrep -x qemu-system-aarch64 >/dev/null 2>&1; do
+    while pgrep -f qemu-system-aarch64 >/dev/null 2>&1; do
         if IFS= read -r -t 2 -u 3 line; then
             case "$line" in
                 *"reboot qemu"*)
@@ -124,7 +137,7 @@ while [ "$boot" -lt "$MAX" ]; do
         fi
     done
 
-    if [ "$restart" = 0 ] && ! pgrep -x qemu-system-aarch64 >/dev/null 2>&1; then
+    if [ "$restart" = 0 ] && ! pgrep -f qemu-system-aarch64 >/dev/null 2>&1; then
         wait "$QPID" 2>/dev/null; rc=$?
         QPID=""
         if [ $((SECONDS - started)) -lt 5 ]; then
