@@ -55,12 +55,31 @@ unpacking 670 MB or running their `./build`.
 **4. Network**
 
 ```sh
-sudo ./net.sh
+sudo ./net.sh          # tap devices only -- what you want
+sudo ./net.sh down     # remove them again
 ```
 
-Needs two host NICs. Under VMware, add a second adapter to the VM. If they
-are not called `eth0`/`eth1`, edit `iflan`/`ifwan` at the top of `net.sh` --
-check with `ip link`. The host takes `192.168.1.2`; DrayOS is `192.168.1.1`.
+The host takes `192.168.1.2` on the LAN tap; DrayOS is `192.168.1.1`. Your
+real NIC is untouched.
+
+`net.sh.kanxue` is the write-up's original, kept for reference. It does not
+run on current Kali: `brctl` is no longer installed by default, and the
+script is not idempotent, so a second run gives `RTNETLINK answers: File
+exists` and `ioctl(TUNSETIFF): Device or resource busy` -- it never removes
+the bridges and taps it created. `net.sh` does the same work with iproute2
+and tears down first.
+
+It also defaults to **not** bridging. The original enslaves two physical
+interfaces and flushes their addresses; on a VMware guest with one adapter
+that disconnects you. Bridging is only needed if other machines on the
+physical network must reach the router:
+
+```sh
+sudo BRIDGE=1 IFLAN=ens33 IFWAN=ens37 ./net.sh
+```
+
+Both interfaces must exist -- add a second adapter to the VM first, and check
+`ip -br link` for their real names.
 
 **5. Boot**
 

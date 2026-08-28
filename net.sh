@@ -1,56 +1,100 @@
 #!/bin/bash
-# Verbatim from the kanxue write-up (thread-289520), which took it from
-# drayrt-release-gpl/output/rootfs/draytek/drayrc/rc.d/rc.41.setupif.sh
+# Host networking for qemu.sh.
 #
-# Bridges the two host NICs to the two tap devices QEMU attaches to.
-# Run as root, once, before qemu.sh.
+#   sudo ./net.sh              tap devices only  (default, safe)
+#   sudo ./net.sh down         remove them again
+#   sudo BRIDGE=1 ./net.sh     the write-up's full bridge topology
 #
-# eth0/eth1 must exist. Under VMware, add a second network adapter to the VM
-# so eth1 is present; "ip link" will show what they are actually called
-# (Kali often uses eth0/eth1 already, but predictable names like ens33/ens37
-# are common -- edit iflan/ifwan below if so).
+# The original script from the write-up is kept beside this one as
+# net.sh.kanxue. It does not run on current Kali: brctl was dropped from
+# bridge-utils' default install, and it is not idempotent -- a second run
+# fails with "RTNETLINK answers: File exists" and "ioctl(TUNSETIFF): Device
+# or resource busy" because it never removes what it made. This version does
+# the same thing with iproute2, and cleans up first.
+#
+# DEFAULT MODE creates only the tap devices and puts 192.168.1.2 on the LAN
+# side. That is all you need to reach DrayOS at 192.168.1.1 from this host,
+# and it leaves your real NIC alone.
+#
+# BRIDGE MODE reproduces the write-up: it enslaves two physical interfaces to
+# bridges and FLUSHES THEIR IP ADDRESSES. On a VMware guest with one adapter
+# that disconnects you, ssh included. Only use it if you have a second NIC
+# and want other machines on the physical network to reach the router.
+set -euo pipefail
 
-iflan=eth0
-ifwan=eth1
-mylanip="192.168.1.2"
+IFLAN=${IFLAN:-eth0}
+IFWAN=${IFWAN:-eth1}
+MYLANIP=${MYLANIP:-192.168.1.2/24}
 
-brctl delbr br-lan
-brctl delbr br-wan
+[ "$(id -u)" = 0 ] || { echo "run me as root" >&2; exit 1; }
+command -v ip >/dev/null || { echo "need iproute2: apt install iproute2" >&2; exit 1; }
 
-ip link add br-lan type bridge
-ip tuntap add qemu-lan mode tap
-brctl addif br-lan $iflan
-brctl addif br-lan qemu-lan
-ip addr flush dev $iflan
-ifconfig br-lan $mylanip
-ifconfig br-lan up
-ifconfig qemu-lan up
-ifconfig $iflan up
+teardown() {
+    for br in br-lan br-wan; do ip link del "$br" 2>/dev/null || true; done
+    for t  in qemu-lan qemu-wan; do ip link del "$t" 2>/dev/null || true; done
+}
 
-ip link add br-wan type bridge
-ip tuntap add qemu-wan mode tap
-brctl addif br-wan $ifwan
-brctl addif br-wan qemu-wan
-ip addr flush dev $ifwan
-ifconfig br-lan $mylanip
-ifconfig br-wan up
-ifconfig qemu-wan up
-ifconfig $ifwan up
+if [ "${1:-}" = down ]; then
+    teardown; echo "[+] removed"; exit 0
+fi
 
-brctl show
+# Always start from a clean slate; this is what made the original fail on a
+# second run.
+teardown
 
-#for speed test
-ethtool -K $iflan gro off
-ethtool -K $iflan gso off
+for t in qemu-lan qemu-wan; do
+    ip tuntap add "$t" mode tap
+    ip link set "$t" up
+done
 
-ethtool -K $ifwan gro off
-ethtool -K $ifwan gso off
+if [ "${BRIDGE:-0}" = 1 ]; then
+    for i in "$IFLAN" "$IFWAN"; do
+        ip link show "$i" >/dev/null 2>&1 || {
+            echo "[x] no such interface: $i" >&2
+            echo "    available:" >&2
+            ip -br link show | awk '{print "      " $1}' >&2
+            echo "    set IFLAN= and IFWAN= to two of these." >&2
+            teardown; exit 1
+        }
+    done
+    echo "[!] flushing addresses on $IFLAN and $IFWAN -- this will drop any"
+    echo "    connection running over them. Ctrl-C within 5s to abort."
+    sleep 5
 
-ethtool -K qemu-lan gro off
-ethtool -K qemu-lan gso off
+    ip link add br-lan type bridge
+    ip link set "$IFLAN"  master br-lan
+    ip link set qemu-lan  master br-lan
+    ip addr flush dev "$IFLAN"
+    ip addr add "$MYLANIP" dev br-lan
+    ip link set br-lan up
+    ip link set "$IFLAN" up
 
-ethtool -K qemu-wan gro off
-ethtool -K qemu-wan gso off
+    ip link add br-wan type bridge
+    ip link set "$IFWAN"  master br-wan
+    ip link set qemu-wan  master br-wan
+    ip addr flush dev "$IFWAN"
+    ip link set br-wan up
+    ip link set "$IFWAN" up
 
-#for telnet from linux to drayos 192.168.1.1
-ethtool -K br-lan tx off
+    LANDEV=br-lan
+else
+    # No bridge: the host end of the LAN tap carries the address directly.
+    ip addr add "$MYLANIP" dev qemu-lan
+    LANDEV=qemu-lan
+fi
+
+# Checksum offload has to be off or DrayOS receives frames it rejects; the
+# write-up disables it for the same reason ("for telnet from linux to drayos").
+if command -v ethtool >/dev/null; then
+    for d in "$LANDEV" qemu-lan qemu-wan; do
+        ethtool -K "$d" gro off gso off tx off 2>/dev/null || true
+    done
+else
+    echo "[!] no ethtool (apt install ethtool); offload left on, which can"
+    echo "    stop traffic reaching DrayOS even once it boots."
+fi
+
+echo
+ip -br addr show qemu-lan qemu-wan ${BRIDGE:+br-lan br-wan} 2>/dev/null || true
+echo
+echo "[+] host is ${MYLANIP%%/*} on $LANDEV; DrayOS will be 192.168.1.1"
