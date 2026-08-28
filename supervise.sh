@@ -114,6 +114,26 @@ while [ "$boot" -lt "$MAX" ]; do
         sleep 0.2
     done
     echo "[supervise] ---- boot $boot ----"
+    # DrayOS compares a _DrayQemuFlashHeader at the head of the UFFS image
+    # against page_size=2048 spare=64 per_block=16 total_block=1024. If the
+    # image is missing, empty, or does not carry that header it reformats,
+    # frmsaves 50 MB and asks to restart -- forever. Show what is actually on
+    # disk between boots so a persistence failure is visible immediately.
+    for f in v3910_ram_flash.bin draycfg.cfg draycert.cfg; do
+        if [ -f "$f" ]; then
+            printf '    %-22s %10d bytes
+' "$f" "$(stat -c%s "$f")"
+        else
+            printf '    %-22s absent
+' "$f"
+        fi
+    done
+    if [ -s v3910_ram_flash.bin ]; then
+        hdr=$(od -An -tu2 -N8 v3910_ram_flash.bin 2>/dev/null | tr -s ' ')
+        echo "    flash header (first 4 u16):$hdr"
+        echo "    DrayOS wants: 2048 64 16 1024 somewhere in there; all zeros"
+        echo "    means the image is not being reloaded and it will reformat."
+    fi
     started=$SECONDS
     "$QEMU_SH" &
     QPID=$!
