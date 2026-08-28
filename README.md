@@ -137,7 +137,30 @@ Memsave Config addr 0x4af489d8 size 5673080
 It stops when DrayOS stops asking, or after `MAX` boots (default 10).
 
 Then `http://192.168.1.1/weblogin.htm`. To start over, delete `draycfg.cfg`,
-`draycert.cfg` and `v3910_ram_flash.bin`.
+`draycert.cfg`, `v3910_ram_flash.bin` and `lan_mac`.
+
+### Two fixes the original needs before it can settle
+
+Both only matter once config persistence works, which is why the write-up
+does not hit them in a single run.
+
+**The MAC must not change.** `qemu.sh` picks a random one on every launch.
+DrayOS saves board info containing it, sees different hardware next boot and
+re-provisions, so it never stops asking to restart. It is now generated once
+into `lan_mac` and reused.
+
+**The flash image must be reloaded from where it is written.** DrayOS sends
+
+```
+frmsave <addr> <size> ./v3910_ram_flash.bin
+```
+
+and the patched QEMU writes that relative to its own working directory --
+this one. The original then reloads `../data/uffs/v3910_ram_flash.bin`, a
+different and empty file, so UFFS came up unformatted every time. That is
+what kept the settings store invalid (`[SS][Init] Unknown Signature ... do
+convert`) and kept the restart requests coming. The binary carries both
+prefixes, `/data/uffs/` for cavium and `./` for x86, and this runs as x86.
 
 `supervise.sh` also creates `serial0.in` and `serial0.out`. QEMU's pipe
 chardev prefers those over a single bidirectional FIFO, which gives guest

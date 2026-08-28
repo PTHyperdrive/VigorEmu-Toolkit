@@ -20,8 +20,21 @@ idx=$1
 printf "%02x\n" $((0x${C}+0x$idx)) | tail -c 3 # 3 = 2 digit + 1 terminating character
 }
 
-A=$(rangen); B=$(rangen); C=$(rangen);
+# DEVIATION: persist the MAC.
+#
+# The original picks a fresh random one on every launch. That is harmless for
+# a single throwaway run, but with config persistence working it is fatal:
+# DrayOS saves board info containing the MAC, sees different hardware on the
+# next boot, and re-provisions -- so it never stops asking to be restarted.
+# The real device has a fixed MAC from board info. Delete lan_mac for a new one.
+if [ -s ./lan_mac ]; then
+    read -r A B C < ./lan_mac
+else
+    A=$(rangen); B=$(rangen); C=$(rangen)
+    echo "$A $B $C" > ./lan_mac
+fi
 LAN_MAC="00:1d:aa:${A}:${B}:${C}"
+echo "[*] LAN MAC $LAN_MAC"
 
 if [ ! -p serial0 ]; then
 mkfifo serial0
@@ -67,9 +80,21 @@ fi
 
 echo "GCI_SKIP" > gci_magic
 
+# DEVIATION: load the flash image back from where DrayOS actually writes it.
+#
+# The original loads ../data/uffs/v3910_ram_flash.bin, but DrayOS sends
+#
+#   frmsave <addr> <size> ./v3910_ram_flash.bin
+#
+# and the patched QEMU writes that relative to its own cwd, which is this
+# directory. The binary carries both prefixes -- "/data/uffs/" for cavium and
+# "./" for x86 -- and platform is x86 here, so the saved image never went back
+# into the path the original reloads. UFFS came up unformatted every boot,
+# which is what kept [SS] invalid ("do convert") and kept DrayOS asking to be
+# restarted. Point both ends at the same file.
 mkdir -p ../data/uffs
-touch ../data/uffs/v3910_ram_flash.bin
-uffs_flash="../data/uffs/v3910_ram_flash.bin"
+uffs_flash="./v3910_ram_flash.bin"
+[ -f "$uffs_flash" ] || touch "$uffs_flash"
 
 echo "1" > memsize
 
