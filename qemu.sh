@@ -148,6 +148,19 @@ echo "0#" > $GEXP_FLAG
 echo "19831026" > $GEXP_FILE
 echo "GCI_SKIP" > $GDEF_FILE
 
+# GDB=1 opens a gdb stub on :1234 and waits for a connection before the first
+# instruction. The vendor script leaves $gdb_remote_option unset; run.sh's own
+# -g branch sets "-s -S" and switches off KVM, which is what this reproduces.
+if [ "${GDB:-0}" = 1 ]; then
+    gdb_remote_option="-s -S"
+    echo "[*] gdb stub on :1234, halted. Attach with:"
+    echo "      gdb-multiarch -ex 'set architecture aarch64' \\"
+    echo "                    -ex 'target remote :1234' -ex c"
+elif [ "${GDBWAIT:-0}" = 1 ]; then
+    gdb_remote_option="-s"
+    echo "[*] gdb stub on :1234, running."
+fi
+
 SHM_SIZE=16777216
 ./qemu-system-aarch64 -M virt,gic_version=3 -cpu cortex-a57 -m 1024 -L ../usr/share/qemu \
 -kernel ./vqemu/sohod64.bin $serial_option -dtb DrayTek \
