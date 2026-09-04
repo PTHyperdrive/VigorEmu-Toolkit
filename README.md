@@ -23,6 +23,7 @@ on the same findings.
 | `qemu.sh` | the launch command (vendor script + four commented deviations) |
 | `supervise.sh` | the `recvCmd` host side that services the reboot handshake |
 | `check.sh` | diagnose why `192.168.1.1` is or is not reachable |
+| `syms.py` | recover ~1200 DrayOS symbols from `sohod64.bin` section names |
 | `cve-2024-51139/` | a contained reproduction lab for the Content-Length overflow |
 
 ## How it differs from vigorlab's `run-drayos.sh`
