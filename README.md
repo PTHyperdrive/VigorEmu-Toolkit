@@ -1,14 +1,32 @@
-# vigorlab-cn-demo
+# VigorEmu-Toolkit
 
-A verbatim reproduction of the kanxue write-up
-([bbs.kanxue.com/thread-289520](https://bbs.kanxue.com/thread-289520.1.htm)),
-kept deliberately separate from `vigorlab`'s own `scripts/run-drayos.sh`.
+Unpack a DrayTek Vigor `.all` firmware image and boot DrayOS under QEMU to a
+live web UI — end to end, on your own machine.
 
-`vigorlab` adapts the vendor scripts to stock QEMU. This does not adapt
-anything: same binary, same flags, same values, same relative paths. If the
-two behave differently, the difference is the finding.
+It follows the kanxue write-up
+([bbs.kanxue.com/thread-289520](https://bbs.kanxue.com/thread-289520.1.htm))
+faithfully — DrayTek's own launch scripts, their patched QEMU — rather than
+adapting to stock QEMU the way [`vigorlab`](https://github.com/PTHyperdrive/vigorlab)
+does. `vigorlab` is the documented reverse-engineering library (unpacker,
+memory mapper, device-tree tooling); this is the runnable emulation kit built
+on the same findings.
 
-## What differs from vigorlab's script
+## Tools
+
+| script | what |
+|---|---|
+| `drayunpack.py` | self-contained `.all` unpacker (a vendor of vigorlab's) |
+| `unpack.sh` | unpack + stage in one step — `.all` in, `firmware/` out |
+| `build-qemu.sh` | build DrayTek's patched QEMU from the GPL release |
+| `stage.sh` | lay an unpacked rootfs out the way `qemu.sh` expects |
+| `net.sh` | host tap/bridge networking |
+| `qemu.sh` | the launch command (vendor script + four commented deviations) |
+| `supervise.sh` | the `recvCmd` host side that services the reboot handshake |
+| `check.sh` | diagnose why `192.168.1.1` is or is not reachable |
+| `cve-2024-51139/` | a contained reproduction lab for the Content-Length overflow |
+
+## How it differs from vigorlab's `run-drayos.sh`
+
 
 | | vigorlab | here |
 |---|---|---|
@@ -26,14 +44,20 @@ handling and will fail trying to open a file called `DrayTek`.
 
 ## Steps
 
-**1. Unpack the firmware**
+**1. Unpack and stage the firmware**
 
 ```sh
-vigorlab unpack v3910_3971.all out/
+./unpack.sh v3910_3971.all out/
 ```
 
-Gives `out/rootfs/` with `firmware/vqemu/sohod64.bin`, `firmware/run.sh` and
-`firmware/magic_file`.
+`drayunpack.py` splits the image and extracts the root filesystem; `unpack.sh`
+then stages it. You get `out/rootfs/` with `firmware/vqemu/sohod64.bin`,
+`firmware/run.sh` and `firmware/magic_file`, plus `out/sohod64.bin` surfaced
+with its sha256. No `vigorlab` checkout is needed — the unpacker is vendored.
+
+Pass the QEMU you build in step 2 to do both at once:
+`./unpack.sh v3910_3971.all out --qemu qemu-build/.../qemu-system-aarch64`
+(then skip step 3).
 
 **2. Build DrayTek's QEMU**
 
