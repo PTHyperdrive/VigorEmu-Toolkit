@@ -66,14 +66,16 @@ printf "  (frame record is 16 bytes: fp at +0, lr at +8)\n"
 set \$f = \$x29
 set \$n = 0
 set \$base = \$x29
+set \$last = \$x29
 while \$f > 0x40000000 && \$f < 0x50000000 && \$n < 16
   set \$ret = *(unsigned int*)(\$f + 8)
   printf "  #%-2d fp=0x%08x  ret=0x%08x  ", \$n, \$f, \$ret
   info symbol \$ret
+  set \$last = \$f
   set \$f = *(unsigned int*)\$f
   set \$n = \$n + 1
 end
-printf "\n  stack used from task entry to here: %d bytes\n", \$f - \$base
+printf "\n  %d frames; stack in use task entry -> handler: %d bytes\n", \$n, \$last - \$base
 printf "  (the last frame returns to DrayOS_TaskReturn -- the bottom of the\n"
 printf "   task stack that OSTaskCreate seeded)\n"
 detach

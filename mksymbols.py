@@ -48,6 +48,10 @@ MEASURED = {
     0x40141578: "add_common_vars",     # builds the fake CGI environment
     0x40143134: "get_mime_headers",    # parses Content-length via sscanf("%ld")
     0x40a4b9d0: "drayos_linear_malloc",
+    0x400bba14: "DrayOS_TaskReturn",   # seeded on every task stack by OSTaskCreate
+    # In the httpd chain but not otherwise identifiable; a neutral name beats
+    # gdb attributing it to the nearest preceding export 456 KB away.
+    0x401291e0: "sub_401291e0",
 }
 
 
