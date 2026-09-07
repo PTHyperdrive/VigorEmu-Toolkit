@@ -14,7 +14,14 @@
 set -uo pipefail
 
 HERE=$(dirname "$(readlink -f "$0")")
-IMG=${IMG:-$HOME/out/sohod64.symbols.elf}
+# sudo resets HOME to /root, so look where the file actually tends to be --
+# including the invoking user's home, which SUDO_USER still names.
+if [ -z "${IMG:-}" ]; then
+    for c in "$HOME/out/sohod64.symbols.elf"              ${SUDO_USER:+"/home/$SUDO_USER/out/sohod64.symbols.elf"}              "$HERE/../out/sohod64.symbols.elf"              "$PWD/sohod64.symbols.elf"; do
+        [ -f "$c" ] && IMG="$c" && break
+    done
+fi
+IMG=${IMG:-}
 HOSTIP=${HOSTIP:-192.168.1.1}
 PORT=${PORT:-1234}
 DISPATCH=0x40141d18          # cgi_stub(): blr x7
