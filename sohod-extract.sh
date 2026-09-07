@@ -12,6 +12,12 @@
 #   symbols.txt       ~1200 names from the ___ksymtab section-name table
 #   cgi-handlers.txt  the CGI dispatch table: URL -> handler address
 #   strings/          categorised strings (cgi, formats, paths, errors, all)
+#   sections/         each ELF section with real bytes, as its own file
+#   web/              the embedded web filesystem: ~1330 real files
+#                     (.htm .js .css images) including V2000/CGI-BIN/.
+#                     Note the .cgi files there are 2-byte stubs: they exist
+#                     so the URL resolves, and the real work is the compiled
+#                     handler in cgi-handlers.txt.
 #   ghidra/           a Jython script that applies every recovered name
 #
 # Nothing here modifies the image; it is all read-only extraction.
@@ -136,6 +142,13 @@ for k, v in counts.items():
     print("    strings/%-11s %d" % (k + ".txt", v))
 PY
 
+# --- 4b. real files: ELF sections and the embedded web tree ------------------
+# The image is not only code. It carries the whole DrayOS web UI as a PFS
+# archive inside a DrayTek LZ4-chunked blob, and every file in that archive is
+# separately compressed again. That tree is where the .cgi pages actually live
+# -- DrayOS has no cgi-bin directory anywhere else.
+python3 "$HERE/sohod_files.py" "$IMG" "$OUT"
+
 # --- 5. the Ghidra script ----------------------------------------------------
 python3 "$HERE/ghidra_export.py" "$IMG" > "$OUT/ghidra/sohod_names.py" 2>/dev/null || true
 echo "    ghidra/sohod_names.py"
@@ -159,6 +172,20 @@ and is the one thing likely to trip the import.
      export table (`sscanf`, `snprintf`, `strcpy`, the driver layer, …);
    - every CGI handler from the dispatch table, prefixed `cgi_` — so
      `cgi_wlogin` is the handler the login form posts to.
+
+## The web tree, and why the .cgi files look empty
+
+`web/V2000/` is the UI DrayOS serves: 1331 files, ~15 MB once decompressed.
+Everything is stored twice-compressed — a PFS archive inside a DrayTek
+LZ4-chunked blob, with each file separately chunked again — so it does not
+show up to `strings` or `binwalk` on the raw image.
+
+`web/V2000/CGI-BIN/` holds 147 `.cgi` files and **most are two bytes**
+(`
+`). They are routing placeholders: their presence makes the httpd's
+path lookup succeed, and the request is then dispatched to a function
+compiled into the image. So the CGI *logic* is never in the web tree — look
+up the endpoint in `cgi-handlers.txt` and go to that address instead.
 
 ## Where to start reading
 
