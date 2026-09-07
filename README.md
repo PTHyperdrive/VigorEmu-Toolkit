@@ -26,6 +26,7 @@ on the same findings.
 | `syms.py` | recover ~1200 DrayOS symbols from `sohod64.bin` section names |
 | `cgimap.py` | recover the CGI dispatch table: URL -> handler address |
 | `sohod-extract.sh` | take `sohod64.bin` apart into a Ghidra-ready folder |
+| `mksymbols.py` | emit a copy of the image carrying a real ELF `.symtab` |
 | `cve-2024-51139/` | a contained reproduction lab for the Content-Length overflow |
 
 ## How it differs from vigorlab's `run-drayos.sh`

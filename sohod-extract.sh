@@ -149,55 +149,66 @@ PY
 # -- DrayOS has no cgi-bin directory anywhere else.
 python3 "$HERE/sohod_files.py" "$IMG" "$OUT"
 
-# --- 5. the Ghidra script ----------------------------------------------------
+# --- 5. an ELF that carries the symbols ---------------------------------------
+# The important output. Ghidra reads .symtab natively, so importing this needs
+# no scripting at all -- which matters, because Ghidra 11 dropped Jython and
+# script-based renaming is the fragile path.
+python3 "$HERE/mksymbols.py" "$IMG" "$OUT/ghidra/sohod64.symbols.elf" 2>/dev/null   && echo "    ghidra/sohod64.symbols.elf   <- import THIS into Ghidra"   || echo "    ghidra/sohod64.symbols.elf   FAILED"
+
+# Kept as a fallback for anyone who would rather script it.
 python3 "$HERE/ghidra_export.py" "$IMG" > "$OUT/ghidra/sohod_names.py" 2>/dev/null || true
-echo "    ghidra/sohod_names.py"
+echo "    ghidra/sohod_names.py        (fallback; needs PyGhidra)"
 
 cat > "$OUT/ghidra/README.md" <<'EOF'
-# Loading sohod64.bin in Ghidra
+# Loading DrayOS in Ghidra
 
-`sohod64.bin` is an **ELF32 with `EM_AARCH64`** — ARM64 in ILP32, so pointers
-are 32-bit while the instruction set is AArch64. That combination is unusual
-and is the one thing likely to trip the import.
+## Import `sohod64.symbols.elf`, not `sohod64.bin`
 
-1. **File > Import File** → `sohod64.bin`.
-2. If the language is not detected, set it manually:
-   `AARCH64:LE:32:ilp32`. Confirm the image base is **`0x40000000`** —
-   the single LOAD segment maps file offset `0x10000` there, so
-   `vaddr = 0x40000000 + (fileoff - 0x10000)`.
-3. Let auto-analysis finish. You will have ~29 MB of `FUN_4xxxxxxx`.
-4. **Window > Script Manager**, add this directory to the script paths, and run
-   **`sohod_names.py`**. It applies:
-   - ~1200 function names recovered from the `___ksymtab+<name>` section-name
-     export table (`sscanf`, `snprintf`, `strcpy`, the driver layer, …);
-   - every CGI handler from the dispatch table, prefixed `cgi_` — so
-     `cgi_wlogin` is the handler the login form posts to.
+`sohod64.symbols.elf` is the same image with a real ELF `.symtab` appended,
+carrying ~1330 names. Ghidra reads `.symtab` natively, so **no script is
+needed** — which matters because Ghidra 11 dropped Jython, and script-based
+renaming is the part that breaks.
 
-## The web tree, and why the .cgi files look empty
+1. **File > Import File** → `sohod64.symbols.elf`
+2. If the language is not auto-detected, set it by hand: **`AARCH64:LE:32:ilp32`**.
+   The image is ELF32 with `EM_AARCH64` — ARM64 with 32-bit pointers, which is
+   the one thing likely to confuse the import. Image base is **`0x40000000`**.
+3. Run auto-analysis. Functions arrive already named.
 
-`web/V2000/` is the UI DrayOS serves: 1331 files, ~15 MB once decompressed.
-Everything is stored twice-compressed — a PFS archive inside a DrayTek
-LZ4-chunked blob, with each file separately chunked again — so it does not
-show up to `strings` or `binwalk` on the raw image.
+Verify it took: the Symbol Tree should contain `cgi_wlogin` at `0x40cd47cc`
+and `sscanf` at `0x40013e30`.
 
-`web/V2000/CGI-BIN/` holds 147 `.cgi` files and **most are two bytes**
-(`
-`). They are routing placeholders: their presence makes the httpd's
-path lookup succeed, and the request is then dispatched to a function
-compiled into the image. So the CGI *logic* is never in the web tree — look
-up the endpoint in `cgi-handlers.txt` and go to that address instead.
+## Do not import the .cgi files
+
+`web/V2000/CGI-BIN/*.cgi` contain **no code**. Most are two bytes (`
+`) —
+they exist so the httpd's URL lookup resolves, and the request is then handed
+to a function compiled into `sohod64.bin`. Ghidra has nothing to disassemble
+in them, which is why it cannot "give an exact function" for one.
+
+To go from a URL to its code, look the endpoint up in `cgi-handlers.txt` and
+jump to that address — or just use the `cgi_` symbols, which are exactly that
+mapping already applied:
+
+    cgi_wlogin        0x40cd47cc     the login form's POST target
+    cgi_frmup         0x40be9384     firmware upload
+    cgi_cfgimport                    config import
+    ...115 in total
 
 ## Where to start reading
 
-| what | why |
+| symbol / address | why |
 |---|---|
 | `cgi_wlogin` | the endpoint the login form posts to |
-| `sscanf` xrefs | `get_mime_headers` parses `Content-length` with `%ld` here |
-| `strings/formats.txt` | `frmsave %d %d %s` / `memsave` are the host-escape primitives |
-| `strings/cgi.txt` | 263 endpoint names — the reachable attack surface |
+| `0x40143134` | `get_mime_headers` — parses `Content-length` via `sscanf("%ld")` |
+| `0x40141578` | `add_common_vars` — builds the CGI environment |
+| `0x40141d18` | the dispatcher: `blr x7` into the handler |
+| `0x40a4b9d0` | DrayOS's linear allocator |
 
-`conn + 0x3450` is the parsed `Content-Length` field; searching for that
-displacement finds the code that consumes it.
+`conn + 0x3450` is the parsed `Content-Length`; searching for that
+displacement finds its consumers. Measured on the live emulator, it is read
+exactly once, to build the `CONTENT_LENGTH` env string.
+
 EOF
 echo "    ghidra/README.md"
 
