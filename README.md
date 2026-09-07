@@ -24,6 +24,8 @@ on the same findings.
 | `supervise.sh` | the `recvCmd` host side that services the reboot handshake |
 | `check.sh` | diagnose why `192.168.1.1` is or is not reachable |
 | `syms.py` | recover ~1200 DrayOS symbols from `sohod64.bin` section names |
+| `cgimap.py` | recover the CGI dispatch table: URL -> handler address |
+| `sohod-extract.sh` | take `sohod64.bin` apart into a Ghidra-ready folder |
 | `cve-2024-51139/` | a contained reproduction lab for the Content-Length overflow |
 
 ## How it differs from vigorlab's `run-drayos.sh`
