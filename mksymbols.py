@@ -37,6 +37,20 @@ def sections(d):
     return e_shoff, e_shentsize, e_shnum, e_shstrndx, out
 
 
+# Functions identified by walking the live call stack at a CGI dispatch, then
+# resolving each return address back to its prologue. Not recoverable from any
+# table in the image, so they are recorded here.
+MEASURED = {
+    0x40139364: "httpd_main",          # the RTOS task, priority 11
+    0x40129f5c: "http_handler",        # names itself in a debug string
+    0x4014469c: "http_parse_request",  # "Invalid HTTP/0.9 method."
+    0x40141b3c: "cgi_stub",            # DrayTek's own name for the dispatcher
+    0x40141578: "add_common_vars",     # builds the fake CGI environment
+    0x40143134: "get_mime_headers",    # parses Content-length via sscanf("%ld")
+    0x40a4b9d0: "drayos_linear_malloc",
+}
+
+
 def collect(image):
     """{addr: name}, CGI handlers winning over generic export names."""
     named = {}
@@ -49,6 +63,8 @@ def collect(image):
         for _ent, nm, hnd, _flags in table:
             stem = nm[:-4].replace(".", "_").replace("-", "_")
             named[hnd] = "cgi_%s" % stem        # override: more specific
+
+    named.update(MEASURED)                  # measured names win over all
     return named
 
 
