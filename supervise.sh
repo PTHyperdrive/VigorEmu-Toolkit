@@ -33,6 +33,20 @@ echo "[supervise] running in $WORKDIR"
 
 MAX=${MAX:-10}
 
+# --- CVE-2024-41585 lab reproduction (opt-in, OFF by default) ----------------
+# On the real device the host-side command listener implements a
+# `set_linux_time` command whose argument is handed to a shell, so a guest that
+# writes
+#     set_linux_time ;<cmd>;
+# to serial gets <cmd> run as root on the host -- the VM escape. Our stub does
+# not need that command to boot DrayOS, so it is disabled unless you opt in. It
+# exists ONLY to make the guest-shellcode -> escape -> host-root chain
+# reproducible on the isolated lab bridge, and it is deliberately injectable,
+# exactly like the device. Enable it with
+#     sudo LAB_REPRO_CVE_2024_41585=1 ./supervise.sh ./qemu.sh
+# and NEVER on anything reachable from a network you do not fully control.
+LAB_REPRO_CVE_2024_41585=${LAB_REPRO_CVE_2024_41585:-0}
+
 if [ "$RESET" = 1 ]; then
     echo "[supervise] clearing saved state"
     rm -f draycfg.cfg draycert.cfg drayf2.cfg license.cfg draycfg.default \
@@ -161,6 +175,19 @@ while [ "$boot" -lt "$MAX" ]; do
                 *halt*|*"reboot linux"*)
                     echo "[supervise] DrayOS asked to halt"; break ;;
             esac
+            # Opt-in reproduction of CVE-2024-41585: model the device's
+            # `set_linux_time` handler, which shells out with the guest's
+            # argument. A guest line of  set_linux_time ;<cmd>;  then runs
+            # <cmd> as root on this host -- the escape, end to end.
+            if [ "$LAB_REPRO_CVE_2024_41585" = 1 ]; then
+                case "$line" in
+                    *set_linux_time*)
+                        arg=${line#*set_linux_time }
+                        printf '[supervise] (41585 repro) set_linux_time: %s\n' "$arg"
+                        sh -c "date -s \"$arg\"" 2>&1 | sed 's/^/[supervise] date: /'
+                        ;;
+                esac
+            fi
         fi
     done
 
