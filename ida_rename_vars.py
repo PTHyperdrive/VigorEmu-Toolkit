@@ -6,14 +6,14 @@
 #   Run AFTER the function-naming scripts (it keys off their names).
 #   IDA:  File > Script file...  (Alt+F7)
 #
-# Heuristic (light local dataflow, small windows). It never renames a slot that
-# already has a non-default name. If the summary prints 0 or errors, tell me
-# your IDA version -- the frame API differs a little across 7.x/8.x/9.x.
+# The stack slot is resolved through the frame API (no text parsing), and
+# registers are matched case-insensitively (IDA prints ARM regs uppercase). If
+# the summary still shows 0 renamed, its 3 counters say which stage failed --
+# paste them and your IDA version.
 
 import re
 import idc, idautils, ida_funcs, ida_ua, ida_frame, ida_name
 
-# callee name -> (arg roles by position, return role or None)
 SEM = {
     "drayos_malloc":  (["size"], "buf"),
     "GetCGI":         (["conn", "input", "env"], "nfields"),
@@ -30,41 +30,36 @@ SEM = {
     "drayos_free":    (["fptr", "fsize"], None),
 }
 
+diag = {"calls": 0, "slots": 0, "renamed": 0, "err": ""}
+
 
 def opreg(ea, n):
-    t = idc.print_operand(ea, n)
-    m = re.match(r"^[wx](\d+)$", t.strip())
+    """Register number of operand n (case-insensitive; -1 if not a w/x reg)."""
+    t = idc.print_operand(ea, n).strip().lower()
+    m = re.match(r"^[wx](\d+)$", t)
     return int(m.group(1)) if m else -1
 
 
-def is_x29_mem(ea, n):
-    t = idc.print_operand(ea, n)
-    return "x29" in t and "[" in t
-
-
-def is_x29_add(ea, n):
-    return idc.print_operand(ea, n).strip() in ("x29",)
-
-
-def stkoff(pfn, ea, opn):
+def stk_slot(pfn, ea):
+    """Frame-struct offset of the stack operand in this insn, or BADADDR."""
     insn = ida_ua.insn_t()
     if ida_ua.decode_insn(insn, ea) <= 0:
         return idc.BADADDR
-    try:
-        return ida_frame.calc_stkvar_struc_offset(pfn, insn, opn)
-    except Exception:
-        return idc.BADADDR
-
-
-def find_mem_op(ea):
-    for n in (1, 2, 0):
-        if is_x29_mem(ea, n):
-            return n
-    return -1
+    for n in range(8):
+        op = insn.ops[n]
+        if op.type == ida_ua.o_void:
+            break
+        try:
+            so = ida_frame.calc_stkvar_struc_offset(pfn, insn, n)
+        except Exception as e:
+            diag["err"] = diag["err"] or repr(e)
+            so = idc.BADADDR
+        if so != idc.BADADDR:
+            return so
+    return idc.BADADDR
 
 
 def main():
-    total = 0
     for fea in idautils.Functions():
         pfn = ida_funcs.get_func(fea)
         if not pfn:
@@ -73,7 +68,7 @@ def main():
         if fid == idc.BADADDR:
             continue
         items = list(idautils.FuncItems(fea))
-        assign = {}                                   # frame offset -> role
+        assign = {}
 
         for idx, ea in enumerate(items):
             if idc.print_insn_mnem(ea).lower() != "bl":
@@ -81,10 +76,10 @@ def main():
             callee = ida_name.get_name(idc.get_operand_value(ea, 0)) or ""
             if callee not in SEM:
                 continue
+            diag["calls"] += 1
             args, ret = SEM[callee]
 
-            # return value: str w0 (maybe via mov) into a slot, just after
-            if ret:
+            if ret:                                        # return value slot
                 hold = 0
                 for j in range(idx + 1, min(idx + 6, len(items))):
                     ej = items[j]; m = idc.print_insn_mnem(ej).lower()
@@ -93,14 +88,12 @@ def main():
                     if m == "mov" and opreg(ej, 1) == hold:
                         hold = opreg(ej, 0); continue
                     if m.startswith("st") and opreg(ej, 0) == hold:
-                        n = find_mem_op(ej)
-                        so = stkoff(pfn, ej, n) if n >= 0 else idc.BADADDR
+                        so = stk_slot(pfn, ej)
                         if so != idc.BADADDR:
                             assign.setdefault(so, ret)
                         break
 
-            # arguments: last set of each arg reg, just before
-            for a, role in enumerate(args):
+            for a, role in enumerate(args):               # argument slots
                 for j in range(idx - 1, max(idx - 12, -1), -1):
                     ej = items[j]; m = idc.print_insn_mnem(ej).lower()
                     if m == "bl":
@@ -108,17 +101,17 @@ def main():
                     if opreg(ej, 0) != a:
                         continue
                     if m.startswith("ld"):
-                        n = find_mem_op(ej)
-                        so = stkoff(pfn, ej, n) if n >= 0 else idc.BADADDR
+                        so = stk_slot(pfn, ej)
                         if so != idc.BADADDR:
                             assign.setdefault(so, role)
                         break
-                    if m == "add" and is_x29_add(ej, 1):
-                        so = stkoff(pfn, ej, 2)
+                    if m == "add":                         # add xA, x29, #off -> &var
+                        so = stk_slot(pfn, ej)
                         if so != idc.BADADDR:
                             assign.setdefault(so, "p_" + role)
                         break
 
+        diag["slots"] += len(assign)
         for so, role in assign.items():
             nm, k = role, 2
             while not idc.set_member_name(fid, so, nm):
@@ -126,10 +119,17 @@ def main():
                 if k > 9:
                     nm = None; break
             if nm:
-                total += 1
+                diag["renamed"] += 1
 
-    print("[rename_vars] renamed %d stack locals from call-site roles" % total)
-    print("              (updates both var_XX and the Hex-Rays local)")
+    print("[rename_vars] matched %d call sites, resolved %d stack slots, renamed %d"
+          % (diag["calls"], diag["slots"], diag["renamed"]))
+    if diag["renamed"] == 0:
+        if diag["calls"] == 0:
+            print("   -> 0 call sites: run the function-naming scripts first")
+        elif diag["slots"] == 0:
+            print("   -> slots 0: calc_stkvar_struc_offset didn't resolve. err=%s" % diag["err"])
+        else:
+            print("   -> slots found but set_member_name failed (frame API mismatch)")
 
 
 main()
