@@ -184,7 +184,11 @@ while [ "$boot" -lt "$MAX" ]; do
                     *set_linux_time*)
                         arg=${line#*set_linux_time }
                         printf '[supervise] (41585 repro) set_linux_time: %s\n' "$arg"
-                        sh -c "date -s \"$arg\"" 2>&1 | sed 's/^/[supervise] date: /'
+                        # Unquoted on purpose: this is the bug. The device
+                        # splices the argument into a shell command, so
+                        # "set_linux_time ;<cmd>;" runs <cmd>. Quoting $arg here
+                        # would make ; a literal and defeat the reproduction.
+                        sh -c "date -s $arg" 2>&1 | sed 's/^/[supervise] date: /'
                         ;;
                 esac
             fi
